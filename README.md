@@ -1,9 +1,5 @@
 # URL to Text Converter Transport Agent for Exchange 2019
 
-[![Build and Test](https://github.com/your-username/mta-url-change/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/your-username/mta-url-change/actions/workflows/ci-cd.yml)
-[![PowerShell Tests](https://github.com/your-username/mta-url-change/actions/workflows/powershell-test.yml/badge.svg)](https://github.com/your-username/mta-url-change/actions/workflows/powershell-test.yml)
-[![Unit Tests](https://github.com/your-username/mta-url-change/actions/workflows/test.yml/badge.svg)](https://github.com/your-username/mta-url-change/actions/workflows/test.yml)
-
 This project contains a custom Exchange Transport Agent that scans all external emails and converts clickable URLs to plain text, preserving the URL content while removing hyperlinking functionality to enhance security.
 
 ## Features
@@ -45,17 +41,13 @@ mta-url-change/
 ├── Properties/
 │   ├── AssemblyInfo.cs                 # Production assembly info
 │   └── AssemblyInfo.Mock.cs            # Mock assembly info
-├── .github/workflows/                  # GitHub Actions CI/CD
-│   ├── ci-cd.yml                       # Main build and test workflow
-│   ├── test.yml                        # Unit test execution
-│   ├── powershell-test.yml             # PowerShell script validation
-│   └── release.yml                     # Release package creation
 ├── Build-Agent.ps1                     # Production build script
 ├── Build-Mock.ps1                      # Mock build script (for testing)
 ├── Install-Agent.ps1                   # Installation script
 ├── Uninstall-Agent.ps1                 # Uninstallation script
 ├── Deploy-Agent.ps1                    # Complete build and deployment
 ├── Test-Agent.ps1                      # Installation verification
+├── App.config                          # Configuration file
 └── README.md                           # This file
 ```
 
@@ -77,7 +69,7 @@ The mock version includes:
 - All agent functionality with simulated Exchange API
 - Full unit test coverage
 - No Exchange Server dependencies
-- Perfect for CI/CD and development
+- Perfect for development and testing
 
 ### Method 2: Production Build Script
 
@@ -127,62 +119,57 @@ Test coverage includes:
 - Error handling and logging
 - Performance benchmarks
 
-## CI/CD and Automation
+## Development Workflow
 
-### GitHub Actions Workflows
-
-This project includes comprehensive GitHub Actions for automated building and testing:
-
-**🔄 Continuous Integration** ([ci-cd.yml](.github/workflows/ci-cd.yml))
-- Builds both mock and production versions
-- Runs unit tests on multiple configurations
-- Performs code analysis and security scanning
-- Automatic release creation on version changes
-
-**🧪 Unit Testing** ([test.yml](.github/workflows/test.yml))  
-- Comprehensive unit test execution
-- Performance benchmarking
-- Test result reporting and artifact upload
-- Daily scheduled test runs
-
-**📜 PowerShell Validation** ([powershell-test.yml](.github/workflows/powershell-test.yml))
-- Syntax validation for all PowerShell scripts
-- Parameter validation testing
-- Mock installation dry-run testing
-- Configuration file validation
-
-**📦 Release Packaging** ([release.yml](.github/workflows/release.yml))
-- Automated release package creation
-- Version management and tagging
-- Multi-artifact release uploads
-- Package content validation
-
-### Local Development Workflow
+### Local Development and Testing
 
 ```powershell
-# 1. Build and test locally
+# 1. Build and test locally (without Exchange dependencies)
 .\Build-Mock.ps1 -RunTests -Configuration Debug
 
 # 2. Test specific functionality
 .\Test-Agent.ps1 -TestEmailTo "your-email@domain.com"
 
-# 3. Deploy to test environment
-.\Deploy-Agent.ps1 -AgentDllPath "bin\Release\UrlToTextTransportAgent.Mock.dll"
-
-# 4. Build production version on Exchange server
+# 3. Build production version on Exchange server
 .\Build-Agent.ps1 -Configuration Release
+
+# 4. Deploy to Exchange server
 .\Deploy-Agent.ps1 -TestAfterInstall
 ```
 
-### Automated Testing Features
+### Testing Features
 
 - **Unit Tests**: 15+ test cases covering all functionality
-- **Integration Tests**: Mock Exchange environment testing
-- **Performance Tests**: Baseline performance monitoring
-- **Security Tests**: Static analysis for potential secrets
-- **Compatibility Tests**: Multi-configuration matrix testing
+- **Mock Exchange Environment**: Testing without Exchange dependencies
+- **Integration Testing**: Complete agent functionality validation
+- **Error Handling**: Comprehensive error scenario coverage
+- **Performance Testing**: Baseline performance monitoring
 
 ## Configuration
+
+### Path Configuration
+
+The agent uses configurable paths instead of hard-coded locations:
+
+**Log Path**: Set via `LogFilePath` in App.config (supports environment variables)
+
+```xml
+<add key="LogFilePath" value="%ProgramData%\Microsoft\Exchange\Logs\UrlToTextAgent.log" />
+```
+
+**Exchange Installation**: Set `EXCHANGE_INSTALL_PATH` environment variable for build-time
+
+```powershell
+$env:EXCHANGE_INSTALL_PATH = "C:\Program Files\Microsoft\Exchange Server\V15"
+```
+
+**Installation Path**: Configurable via PowerShell scripts
+
+```powershell
+.\Deploy-Agent.ps1 -InstallPath "%ProgramFiles%\Exchange\TransportAgents"
+```
+
+### Domain Configuration
 
 Before building, update the internal domains in `UrlToTextAgent.cs`:
 
@@ -237,10 +224,10 @@ Log levels can be configured in `App.config`:
 
 ### Installation Steps
 
-1. Copy the built DLL to the Exchange Server (e.g., `C:\ExchangeAgents\`)
+1. Copy the built DLL to the Exchange Server (e.g., `%ProgramFiles%\Exchange\TransportAgents\`)
 2. Run the installation script as Administrator:
    ```powershell
-   .\Install-Agent.ps1 -AgentDllPath "C:\ExchangeAgents\UrlToTextTransportAgent.dll"
+   .\Install-Agent.ps1 -AgentDllPath "%ProgramFiles%\Exchange\TransportAgents\UrlToTextTransportAgent.dll"
    ```
 
 ### Manual Installation
@@ -252,7 +239,7 @@ If you prefer manual installation:
 Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn
 
 # Install the agent
-Install-TransportAgent -Name "UrlToTextAgent" -TransportAgentFactory "UrlToTextTransportAgent.UrlToTextAgentFactory" -AssemblyPath "C:\ExchangeAgents\UrlToTextTransportAgent.dll"
+Install-TransportAgent -Name "UrlToTextAgent" -TransportAgentFactory "UrlToTextTransportAgent.UrlToTextAgentFactory" -AssemblyPath "%ProgramFiles%\Exchange\TransportAgents\UrlToTextTransportAgent.dll"
 
 # Set priority (lower number = higher priority)
 Set-TransportAgent -Identity "UrlToTextAgent" -Priority 1
@@ -274,7 +261,7 @@ Get-TransportAgent -Identity "UrlToTextAgent"
 
 ### Check Agent Logs
 
-Monitor the log file at `C:\ExchangeLogs\UrlToTextAgent.log` for processing information.
+Monitor the log file at `%ProgramData%\Microsoft\Exchange\Logs\UrlToTextAgent.log` (or your configured path) for processing information.
 
 ### Test the Agent
 
@@ -324,11 +311,24 @@ Restart-Service MSExchangeTransport
 
 ### Log Locations
 
-- Agent logs: `C:\ExchangeLogs\UrlToTextAgent.log`
-- Backup logs: `%TEMP%\UrlToTextAgent_backup.log` (if main logging fails)
-- Exchange Transport logs: `C:\Program Files\Microsoft\Exchange Server\V15\TransportRoles\Logs\MessageTracking\`
-- Windows Event Logs: Applications and Services Logs → Microsoft → Exchange
+- **Agent logs**: Configured in App.config (default: `%ProgramData%\Microsoft\Exchange\Logs\UrlToTextAgent.log`)
+- **Backup logs**: `%TEMP%\UrlToTextAgent_backup.log` (if main logging fails)
+- **Exchange Transport logs**: `%ProgramFiles%\Microsoft\Exchange Server\V15\TransportRoles\Logs\MessageTracking\`
+- **Windows Event Logs**: Applications and Services Logs → Microsoft → Exchange
 - **Windows Event Logs (Agent)**: Windows Logs → Application (Source: UrlToTextAgent)
+
+### Environment Variables
+
+- **EXCHANGE_AGENT_LOG_PATH**: Override log file location
+- **EXCHANGE_INSTALL_PATH**: Set Exchange installation directory for building
+
+```powershell
+# Set custom log path
+$env:EXCHANGE_AGENT_LOG_PATH = "D:\Logs\UrlToTextAgent.log"
+
+# Set Exchange path for building
+$env:EXCHANGE_INSTALL_PATH = "C:\Program Files\Microsoft\Exchange Server\V15"
+```
 
 ### Understanding Log Levels
 
@@ -341,15 +341,19 @@ Restart-Service MSExchangeTransport
 ### Log Analysis Examples
 
 ```powershell
+# Get configured log path
+$logPath = "$env:ProgramData\Microsoft\Exchange\Logs\UrlToTextAgent.log"
+if ($env:EXCHANGE_AGENT_LOG_PATH) { $logPath = $env:EXCHANGE_AGENT_LOG_PATH }
+
 # Check for processing errors
-Get-Content C:\ExchangeLogs\UrlToTextAgent.log | Where-Object { $_ -match '\[ERROR\]' }
+Get-Content $logPath | Where-Object { $_ -match '\[ERROR\]' }
 
 # Count URLs converted today
 $today = Get-Date -Format "yyyy-MM-dd"
-Get-Content C:\ExchangeLogs\UrlToTextAgent.log | Where-Object { $_ -match $today -and $_ -match 'Total URLs converted' }
+Get-Content $logPath | Where-Object { $_ -match $today -and $_ -match 'Total URLs converted' }
 
 # Check signed/encrypted emails skipped
-Get-Content C:\ExchangeLogs\UrlToTextAgent.log | Where-Object { $_ -match 'signed or encrypted.*skipping' }
+Get-Content $logPath | Where-Object { $_ -match 'signed or encrypted.*skipping' }
 ```
 
 ## Customization

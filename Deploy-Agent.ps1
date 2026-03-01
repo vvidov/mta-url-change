@@ -9,7 +9,7 @@ param(
     [string]$AgentName = "UrlToTextAgent",
     
     [Parameter(Mandatory=$false)]
-    [string]$InstallPath = "C:\ExchangeAgents",
+    [string]$InstallPath = "$env:ProgramFiles\Exchange\TransportAgents",
     
     [Parameter(Mandatory=$false)]
     [switch]$SkipBuild,
@@ -102,6 +102,9 @@ if ($TestAfterInstall) {
 }
 
 # Summary
+# Get default log path
+$defaultLogPath = "$env:ProgramData\Microsoft\Exchange\Logs\UrlToTextAgent.log"
+
 Write-Host "`n" + "=" * 50 -ForegroundColor Green
 Write-Host "DEPLOYMENT COMPLETED SUCCESSFULLY!" -ForegroundColor Green
 Write-Host "=" * 50 -ForegroundColor Green
@@ -109,7 +112,7 @@ Write-Host "=" * 50 -ForegroundColor Green
 Write-Host "`nAgent Details:" -ForegroundColor Cyan
 Write-Host "  Name: $AgentName" -ForegroundColor Gray
 Write-Host "  DLL Location: $targetDll" -ForegroundColor Gray
-Write-Host "  Log File: C:\ExchangeLogs\UrlToTextAgent.log" -ForegroundColor Gray
+Write-Host "  Log File: $defaultLogPath" -ForegroundColor Gray
 
 Write-Host "`nNext Steps:" -ForegroundColor Cyan
 Write-Host "  1. Send test emails from external accounts with URLs" -ForegroundColor Gray
@@ -119,7 +122,7 @@ Write-Host "  4. Run .\Test-Agent.ps1 for detailed status" -ForegroundColor Gray
 
 Write-Host "`nUseful Commands:" -ForegroundColor Cyan
 Write-Host "  Get-TransportAgent -Identity '$AgentName'" -ForegroundColor Gray
-Write-Host "  Get-Content C:\ExchangeLogs\UrlToTextAgent.log -Tail 10" -ForegroundColor Gray
+Write-Host "  Get-Content '$defaultLogPath' -Tail 10" -ForegroundColor Gray
 Write-Host "  .\Uninstall-Agent.ps1  # To remove the agent" -ForegroundColor Gray
 
 Write-Host "`nFor support, see README.md for troubleshooting steps." -ForegroundColor Yellow

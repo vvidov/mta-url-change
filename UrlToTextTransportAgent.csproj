@@ -32,6 +32,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
+    <Reference Include="System.Configuration" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
@@ -41,13 +42,15 @@
     <Reference Include="System.Xml" />
     <!-- Exchange Transport Agent API Reference -->
     <!-- Note: You need to add Microsoft.Exchange.Data.Transport.dll from your Exchange Server installation -->
-    <!-- Typically located at: C:\Program Files\Microsoft\Exchange Server\V15\Public\Microsoft.Exchange.Data.Transport.dll -->
+    <!-- Exchange path can be set via EXCHANGE_INSTALL_PATH environment variable, defaults to standard location -->
     <Reference Include="Microsoft.Exchange.Data.Transport">
-      <HintPath>C:\Program Files\Microsoft\Exchange Server\V15\Public\Microsoft.Exchange.Data.Transport.dll</HintPath>
+      <HintPath Condition="'$(EXCHANGE_INSTALL_PATH)' != ''">$(EXCHANGE_INSTALL_PATH)\Public\Microsoft.Exchange.Data.Transport.dll</HintPath>
+      <HintPath Condition="'$(EXCHANGE_INSTALL_PATH)' == ''">C:\Program Files\Microsoft\Exchange Server\V15\Public\Microsoft.Exchange.Data.Transport.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Microsoft.Exchange.Data.Common">
-      <HintPath>C:\Program Files\Microsoft\Exchange Server\V15\Public\Microsoft.Exchange.Data.Common.dll</HintPath>
+      <HintPath Condition="'$(EXCHANGE_INSTALL_PATH)' != ''">$(EXCHANGE_INSTALL_PATH)\Public\Microsoft.Exchange.Data.Common.dll</HintPath>
+      <HintPath Condition="'$(EXCHANGE_INSTALL_PATH)' == ''">C:\Program Files\Microsoft\Exchange Server\V15\Public\Microsoft.Exchange.Data.Common.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>

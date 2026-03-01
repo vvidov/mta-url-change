@@ -65,7 +65,12 @@ try {
 
 # Check log file
 Write-Host "`n3. Checking Agent Log File..." -ForegroundColor Yellow
-$logPath = "C:\ExchangeLogs\UrlToTextAgent.log"
+# Try to get log path from environment or use default
+$logPath = if ($env:EXCHANGE_AGENT_LOG_PATH) { 
+    $env:EXCHANGE_AGENT_LOG_PATH 
+} else { 
+    "$env:ProgramData\Microsoft\Exchange\Logs\UrlToTextAgent.log" 
+}
 try {
     if (Test-Path $logPath) {
         $logInfo = Get-Item $logPath

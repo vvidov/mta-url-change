@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Linq;
+using System.Configuration;
 using Microsoft.Exchange.Data.Transport;
 using Microsoft.Exchange.Data.Transport.Email;
 using Microsoft.Exchange.Data.Transport.Routing;
@@ -23,7 +24,7 @@ namespace UrlToTextTransportAgent
     /// </summary>
     public class UrlToTextAgent : RoutingAgent
     {
-        private static readonly string LogPath = @"C:\ExchangeLogs\UrlToTextAgent.log";
+        private static readonly string LogPath = GetConfiguredLogPath();
 
         public UrlToTextAgent()
         {
@@ -34,6 +35,48 @@ namespace UrlToTextTransportAgent
             this.OnResolvedMessage += OnResolvedMessageHandler;
             
             LogMessage("Event handlers registered successfully", "DEBUG");
+        }
+
+        /// <summary>
+        /// Gets the configured log file path from App.config or uses default location
+        /// </summary>
+        private static string GetConfiguredLogPath()
+        {
+            try
+            {
+                string configPath = ConfigurationManager.AppSettings["LogFilePath"];
+                if (!string.IsNullOrEmpty(configPath))
+                {
+                    // Expand environment variables
+                    configPath = Environment.ExpandEnvironmentVariables(configPath);
+                    
+                    // Ensure directory exists
+                    string directory = Path.GetDirectoryName(configPath);
+                    if (!Directory.Exists(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+                    
+                    return configPath;
+                }
+            }
+            catch
+            {
+                // Fall back to default if config reading fails
+            }
+            
+            // Default fallback path
+            string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), 
+                                            "Microsoft", "Exchange", "Logs", "UrlToTextAgent.log");
+            
+            // Ensure directory exists
+            string defaultDirectory = Path.GetDirectoryName(defaultPath);
+            if (!Directory.Exists(defaultDirectory))
+            {
+                Directory.CreateDirectory(defaultDirectory);
+            }
+            
+            return defaultPath;
         }
 
         /// <summary>
