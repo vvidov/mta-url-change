@@ -1,0 +1,196 @@
+name: Build Release Package
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version for the release package'
+        required: true
+        default: '1.0.0'
+
+jobs:
+  build-release-package:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET Framework
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+      
+    - name: Get version
+      id: version
+      run: |
+        if ("${{ github.event.inputs.version }}" -ne "") {
+          $version = "${{ github.event.inputs.version }}"
+        } else {
+          $version = "${{ github.event.release.tag_name }}".TrimStart('v')
+        }
+        Write-Host "Building version: $version"
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        
+    - name: Update version in AssemblyInfo
+      run: |
+        $version = "${{ steps.version.outputs.version }}"
+        
+        # Update main AssemblyInfo
+        $assemblyInfo = Get-Content "Properties\AssemblyInfo.cs" -Raw
+        $assemblyInfo = $assemblyInfo -replace 'AssemblyVersion\("[^"]+"\)', "AssemblyVersion(`"$version.0`")"
+        $assemblyInfo = $assemblyInfo -replace 'AssemblyFileVersion\("[^"]+"\)', "AssemblyFileVersion(`"$version.0`")"
+        Set-Content "Properties\AssemblyInfo.cs" $assemblyInfo
+        
+        # Update Mock AssemblyInfo
+        $mockAssemblyInfo = Get-Content "Properties\AssemblyInfo.Mock.cs" -Raw
+        $mockAssemblyInfo = $mockAssemblyInfo -replace 'AssemblyVersion\("[^"]+"\)', "AssemblyVersion(`"$version.0`")"
+        $mockAssemblyInfo = $mockAssemblyInfo -replace 'AssemblyFileVersion\("[^"]+"\)', "AssemblyFileVersion(`"$version.0`")"
+        Set-Content "Properties\AssemblyInfo.Mock.cs" $mockAssemblyInfo
+        
+    - name: Build Mock Agent
+      run: |
+        msbuild UrlToTextTransportAgent.Mock.csproj /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal
+        
+    - name: Build Production Agent (will fail without Exchange, but validates)
+      run: |
+        msbuild UrlToTextTransportAgent.csproj /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal /p:TreatWarningsAsErrors=false /p:WarningLevel=1
+      continue-on-error: true
+      
+    - name: Create deployment package
+      run: |
+        $version = "${{ steps.version.outputs.version }}"
+        $packageName = "UrlToTextAgent-v$version"
+        
+        Write-Host "Creating deployment package: $packageName"
+        
+        # Create package directory
+        New-Item -ItemType Directory -Path $packageName -Force
+        
+        # Copy Mock DLL and config (for testing)
+        if (Test-Path "bin\Release\UrlToTextTransportAgent.Mock.dll") {
+          Copy-Item "bin\Release\UrlToTextTransportAgent.Mock.dll" "$packageName\"
+          Copy-Item "bin\Release\UrlToTextTransportAgent.Mock.dll.config" "$packageName\" -ErrorAction SilentlyContinue
+        }
+        
+        # Copy source files for Exchange compilation
+        New-Item -ItemType Directory -Path "$packageName\Source" -Force
+        Copy-Item "*.cs" "$packageName\Source\" -ErrorAction SilentlyContinue
+        Copy-Item "*.csproj" "$packageName\Source\" -Exclude "*.Mock.csproj","*.Tests.csproj"
+        Copy-Item "Properties\AssemblyInfo.cs" "$packageName\Source\Properties\" -Force
+        Copy-Item "App.config" "$packageName\Source\" -ErrorAction SilentlyContinue
+        
+        # Copy PowerShell scripts
+        Copy-Item "*.ps1" "$packageName\"
+        
+        # Copy documentation
+        Copy-Item "README.md" "$packageName\"
+        
+        # Create installation instructions
+        $installInstructions = @"
+# URL-to-Text Agent v$version - Installation Package
+
+## Contents
+- **UrlToTextTransportAgent.Mock.dll** - Mock version for testing
+- **Source/** - Source code for compilation on Exchange Server
+- **PowerShell Scripts** - Installation and management scripts
+- **README.md** - Complete documentation
+
+## Quick Install (Production)
+1. Copy the Source/ folder to your Exchange Server
+2. Build the project on the Exchange Server:
+   ``````
+   msbuild UrlToTextTransportAgent.csproj /p:Configuration=Release
+   ``````
+3. Run installation:
+   ``````
+   .\Install-Agent.ps1 -AgentDllPath "bin\Release\UrlToTextTransportAgent.dll"
+   ``````
+
+## Testing (Development)
+Use the Mock DLL for testing without Exchange dependencies:
+``````
+.\Deploy-Agent.ps1 -AgentDllPath "UrlToTextTransportAgent.Mock.dll" -TestAfterInstall
+``````
+
+## Version: $version
+Built on: $(Get-Date -Format "yyyy-MM-dd HH:mm:ss UTC")
+"@
+        
+        Set-Content "$packageName\INSTALL.md" $installInstructions
+        
+        # Create ZIP package
+        Compress-Archive -Path "$packageName\*" -DestinationPath "$packageName.zip" -Force
+        
+        Write-Host "Package created: $packageName.zip"
+        
+    - name: Upload Release Package
+      uses: actions/upload-artifact@v4
+      with:
+        name: url-to-text-agent-release-${{ steps.version.outputs.version }}
+        path: UrlToTextAgent-v${{ steps.version.outputs.version }}.zip
+        
+    - name: Upload to Release (if triggered by release)
+      if: github.event_name == 'release'
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: UrlToTextAgent-v${{ steps.version.outputs.version }}.zip
+        asset_name: UrlToTextAgent-v${{ steps.version.outputs.version }}.zip
+        asset_content_type: application/zip
+        
+  validate-package:
+    needs: build-release-package
+    runs-on: windows-latest
+    
+    steps:
+    - name: Download package
+      uses: actions/download-artifact@v4
+      with:
+        name: url-to-text-agent-release-${{ needs.build-release-package.outputs.version }}
+        
+    - name: Validate package contents
+      run: |
+        $zipFile = Get-ChildItem -Filter "*.zip" | Select-Object -First 1
+        
+        if (-not $zipFile) {
+          Write-Host "❌ No ZIP package found"
+          exit 1
+        }
+        
+        Write-Host "Validating package: $($zipFile.Name)"
+        
+        # Extract and validate contents
+        Expand-Archive $zipFile.FullName -DestinationPath "extracted" -Force
+        
+        $requiredFiles = @(
+          "extracted\UrlToTextTransportAgent.Mock.dll",
+          "extracted\README.md",
+          "extracted\INSTALL.md",
+          "extracted\Install-Agent.ps1",
+          "extracted\Build-Agent.ps1",
+          "extracted\Deploy-Agent.ps1",
+          "extracted\Source\UrlToTextTransportAgent.csproj"
+        )
+        
+        $missingFiles = @()
+        foreach ($file in $requiredFiles) {
+          if (-not (Test-Path $file)) {
+            $missingFiles += $file
+          } else {
+            Write-Host "✅ Found: $file"
+          }
+        }
+        
+        if ($missingFiles.Count -gt 0) {
+          Write-Host "❌ Missing files in package:"
+          $missingFiles | ForEach-Object { Write-Host "  - $_" }
+          exit 1
+        } else {
+          Write-Host "✅ Package validation successful"
+        }

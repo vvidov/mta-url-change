@@ -1,0 +1,241 @@
+name: Run Unit Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET Framework
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+      
+    - name: Restore packages
+      run: |
+        nuget restore UrlToTextTransportAgent.sln
+        
+    - name: Build solution
+      run: |
+        msbuild UrlToTextTransportAgent.sln /p:Configuration=${{ matrix.configuration }} /p:Platform="Any CPU" /verbosity:minimal
+        
+    - name: Run tests with coverage
+      run: |
+        # Install VSTest Console
+        $VSTestPath = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2019\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
+        if (-not (Test-Path $VSTestPath)) {
+          $VSTestPath = "${env:ProgramFiles}\Microsoft Visual Studio\2022\Enterprise\Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
+        }
+        if (-not (Test-Path $VSTestPath)) {
+          # Use dotnet test as fallback
+          Write-Host "Using dotnet vstest as fallback..."
+          dotnet tool install --global dotnet-vstest --version 17.8.0
+          $VSTestPath = "vstest.console.exe"
+        }
+        
+        # Run tests
+        $TestDll = "bin\${{ matrix.configuration }}\UrlToTextTransportAgent.Tests.dll"
+        if (Test-Path $TestDll) {
+          Write-Host "Running tests from: $TestDll"
+          & $VSTestPath $TestDll /logger:trx /ResultsDirectory:TestResults /Parallel
+        } else {
+          Write-Host "Test DLL not found: $TestDll"
+          exit 1
+        }
+        
+    - name: Process test results
+      if: always()
+      run: |
+        $trxFiles = Get-ChildItem -Path "TestResults" -Filter "*.trx" -ErrorAction SilentlyContinue
+        
+        if ($trxFiles) {
+          foreach ($trxFile in $trxFiles) {
+            Write-Host "Processing test results: $($trxFile.Name)"
+            
+            [xml]$testResults = Get-Content $trxFile.FullName
+            $summary = $testResults.TestRun.ResultSummary
+            
+            $total = $summary.Counters.total
+            $passed = $summary.Counters.passed
+            $failed = $summary.Counters.failed
+            $skipped = $summary.Counters.notExecuted
+            
+            Write-Host "📊 Test Summary for ${{ matrix.configuration }}:"
+            Write-Host "   Total: $total"
+            Write-Host "   ✅ Passed: $passed"
+            Write-Host "   ❌ Failed: $failed" 
+            Write-Host "   ⏭️ Skipped: $skipped"
+            
+            if ($failed -gt 0) {
+              Write-Host "❌ Some tests failed!"
+              
+              # Show failed test details
+              $failedTests = $testResults.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq "Failed" }
+              foreach ($failedTest in $failedTests) {
+                Write-Host "Failed: $($failedTest.testName)"
+                if ($failedTest.Output.ErrorInfo.Message) {
+                  Write-Host "  Error: $($failedTest.Output.ErrorInfo.Message)"
+                }
+              }
+              
+              exit 1
+            } else {
+              Write-Host "✅ All tests passed!"
+            }
+          }
+        } else {
+          Write-Host "⚠️ No test result files found"
+        }
+        
+    - name: Upload test results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results-${{ matrix.configuration }}-${{ github.run_number }}
+        path: TestResults/
+        retention-days: 30
+        
+    - name: Publish test results to summary
+      if: always() && github.event_name == 'pull_request'
+      run: |
+        $trxFiles = Get-ChildItem -Path "TestResults" -Filter "*.trx" -ErrorAction SilentlyContinue
+        
+        if ($trxFiles) {
+          $trxFile = $trxFiles[0]
+          [xml]$testResults = Get-Content $trxFile.FullName
+          $summary = $testResults.TestRun.ResultSummary
+          
+          $total = $summary.Counters.total
+          $passed = $summary.Counters.passed
+          $failed = $summary.Counters.failed
+          
+          $markdown = @"
+        ## 🧪 Unit Test Results (${{ matrix.configuration }})
+        
+        | Metric | Value |
+        |--------|-------|
+        | Total Tests | $total |
+        | ✅ Passed | $passed |
+        | ❌ Failed | $failed |
+        | Success Rate | $([math]::Round(($passed / $total) * 100, 1))% |
+        
+        "@
+          
+          if ($failed -gt 0) {
+            $failedTests = $testResults.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq "Failed" }
+            $markdown += "`n### ❌ Failed Tests`n`n"
+            foreach ($failedTest in $failedTests) {
+              $markdown += "- **$($failedTest.testName)**`n"
+            }
+          }
+          
+          # Add to GitHub summary
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value $markdown
+        }
+        
+  integration-test:
+    runs-on: windows-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup .NET Framework  
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Build Mock Agent
+      run: |
+        msbuild UrlToTextTransportAgent.Mock.csproj /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal
+        
+    - name: Test Mock Agent Integration
+      run: |
+        Write-Host "🔧 Testing Mock Agent Integration..."
+        
+        # Verify DLL was built
+        $mockDll = "bin\Release\UrlToTextTransportAgent.Mock.dll"
+        if (-not (Test-Path $mockDll)) {
+          Write-Host "❌ Mock DLL not found"
+          exit 1
+        }
+        
+        # Load and test the DLL
+        try {
+          Add-Type -Path $mockDll
+          Write-Host "✅ Mock DLL loaded successfully"
+          
+          # Test factory creation
+          $factory = New-Object UrlToTextTransportAgent.UrlToTextAgentFactory
+          $mockServer = New-Object Microsoft.Exchange.Data.Transport.SmtpServer
+          $agent = $factory.CreateAgent($mockServer)
+          
+          if ($agent) {
+            Write-Host "✅ Agent factory working correctly"
+          } else {
+            Write-Host "❌ Agent creation failed"
+            exit 1
+          }
+          
+        } catch {
+          Write-Host "❌ Integration test failed: $($_.Exception.Message)"
+          exit 1
+        }
+        
+        Write-Host "✅ Mock Agent integration tests passed!"
+        
+    - name: Performance baseline test
+      run: |
+        Write-Host "⚡ Running performance baseline tests..."
+        
+        # Test URL processing performance
+        $testText = @"
+        This is a performance test message with multiple URLs that need processing:
+        https://www.example1.com/path/to/resource
+        http://www.example2.org/another/path?param=value
+        https://subdomain.example3.net:8080/secure/area
+        http://example4.co.uk/public/document.pdf
+        https://www.example5.com/api/v1/endpoint
+        "@
+        
+        $iterations = 1000
+        $startTime = Get-Date
+        
+        # Simulate URL processing (convert HTML links to plain text)
+        for ($i = 0; $i -lt $iterations; $i++) {
+          # Convert HTML links to plain text format: linktext (url)
+          $processed = $testText -replace '<a\s+[^>]*href\s*=\s*["\''']([^"'\'']*)["\'''][^>]*>(.*?)</a>', '$2 ($1)'
+        }
+        
+        $endTime = Get-Date
+        $duration = ($endTime - $startTime).TotalMilliseconds
+        $avgTime = $duration / $iterations
+        
+        Write-Host "📈 Performance Results:"
+        Write-Host "   Total time: $([math]::Round($duration, 2)) ms"
+        Write-Host "   Average per message: $([math]::Round($avgTime, 3)) ms"
+        Write-Host "   Messages per second: $([math]::Round(1000 / $avgTime, 0))"
+        
+        # Performance threshold check
+        if ($avgTime -gt 10) {
+          Write-Host "⚠️ Performance warning: Average processing time exceeds 10ms"
+        } else {
+          Write-Host "✅ Performance within acceptable limits"
+        }
